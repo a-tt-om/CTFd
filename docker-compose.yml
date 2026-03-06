@@ -1,0 +1,104 @@
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: always
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=eyJhIjoiMWIxMzc0YjVjN2Y3NjA2OTU4MDc0MDJmMTc5MTBlZmMiLCJ0IjoiMTk2YzM3OTktOTFkZC00YzI0LWEwZTktZjg4ZmExMDVhMzE4IiwicyI6Ik4ySmpPRFkxWXpZdE1UTmtNUzAwWWprMUxXSXlNRGd0WldSa1pEZzVObUpoTXpWayJ9
+    networks:
+      - default
+    depends_on:
+      - nginx
+
+  nginx:
+    image: nginx:stable
+    restart: always
+    volumes:
+      - ./conf/nginx/http.conf:/etc/nginx/nginx.conf
+    ports:
+      - "127.0.0.1:8080:80" # Localhost only, cloudflared tunnels to nginx:80
+    depends_on:
+      - ctfd
+    networks:
+      - default
+
+  traefik:
+    image: traefik:v2.11
+    restart: always
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--api.insecure=false"
+    ports:
+      - "100.64.0.5:80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - DOCKER_API_VERSION=1.45
+    networks:
+      - default
+      - ctfd-challenges
+
+  ctfd:
+    build: .
+    user: root
+    restart: always
+    # Không expose port ra ngoài — nginx proxy vào ctfd:8000 nội bộ
+    environment:
+      - UPLOAD_FOLDER=/var/uploads
+      - DATABASE_URL=mysql+pymysql://ctfd:ctfd@db/ctfd
+      - REDIS_URL=redis://cache:6379
+      - WORKERS=1
+      - LOG_FOLDER=/var/log/CTFd
+      - ACCESS_LOG=-
+      - ERROR_LOG=-
+      - REVERSE_PROXY=true
+    volumes:
+      - .data/CTFd/logs:/var/log/CTFd
+      - .data/CTFd/uploads:/var/uploads
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - db
+    networks:
+      default:
+      internal:
+
+  db:
+    image: mariadb:10.11
+    restart: always
+    environment:
+      - MARIADB_ROOT_PASSWORD=ctfd
+      - MARIADB_USER=ctfd
+      - MARIADB_PASSWORD=ctfd
+      - MARIADB_DATABASE=ctfd
+      - MARIADB_AUTO_UPGRADE=1
+    volumes:
+      - .data/mysql:/var/lib/mysql
+    networks:
+      internal:
+    command:
+      [
+        mysqld,
+        --character-set-server=utf8mb4,
+        --collation-server=utf8mb4_unicode_ci,
+        --wait_timeout=28800,
+        --log-warnings=0,
+      ]
+
+  cache:
+    image: redis:4
+    restart: always
+    volumes:
+      - .data/redis:/data
+    networks:
+      internal:
+    command: redis-server --notify-keyspace-events Ex --appendonly yes
+
+networks:
+  default:
+  internal:
+    internal: true
+  ctfd-challenges:
+    name: ctfd-challenges
+    internal: false
