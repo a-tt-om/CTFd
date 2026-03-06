@@ -24,6 +24,7 @@ services:
 
   traefik:
     image: traefik:v2.11
+    container_name: traefik
     restart: always
     command:
       - "--providers.docker=true"
@@ -31,7 +32,7 @@ services:
       - "--entrypoints.web.address=:80"
       - "--api.insecure=false"
     ports:
-      - "100.64.0.5:80:80"
+      - "100.64.0.64:80:80"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
